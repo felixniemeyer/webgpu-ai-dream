@@ -1,0 +1,144 @@
+
+# webgpu 
+
+- hintergrund: ein shader, der ein flat object zeichnet 
+  - z.B. einfach ein dreieck oder ein kreis
+
+
+
+# training idea
+
+- AI Video generation, die in realtime läuft 
+- viel ressourcen braucht
+- Aber von mehreren Leuten konsumiert wird
+- Und dadurch auch trainiert wird: 
+  - Wie lange User bleiben
+  - Und, wie viele User da sind, im Vergleich zu den anderen zwei Streams
+  - Insgesamt 3 streams
+    - Random shuffle
+    - Gelegentlich wird einer dupliziert
+
+- use webgpu right away
+  - shipped on chrome
+
+# initial 
+
+we use matrix multiplications. 
+
+- for every channel: 
+  - 4 pixels 
+  - random 4x4 matrix
+  - 4 values
+
+- for every pixel 
+  - rgb 
+
+
+would be nice to do convolution...
+need more textures, half resolution
+
+// 
+
+So, we have a 
+
+// half down 
+
+- for every fragment of a texture with half the size: 
+  - read 4 pixels into 4 vec4
+  - 
+
+
+// 
+
+Including Audio!!!
+- read pixels at the border
+- react to deltas
+- clamp to border and make 12% border to link audio more to visual
+
+woooaaw
+ 
+(Ich klaue einfach alles, was ich auf twitter sehe xD)
+
+maybe use bpm midi sync 
+
+Generate MIDI and send it out
+  - use playNote
+  - with parameter options.time
+  - using WebMIDI.time
+
+//
+
+So, we make 4ths tak tak tak tak, and maybe 120 bpm, so 2 frames per second. We can do expensive frames. 
+
+I'd like to half down a lot, but without much texture duplication... or maybe?
+
+The thing is, I am constrained in the amount of textures I can render to. 
+I could keep the textures 1024 but that leads to chaotic lookups... or does it?
+I think it does not work. 
+
+
+So what can I do?
+
+- Keep the frame as rgba float16. 
+- for a texture with 512: 
+  - load 4 pixels from 1024
+  - per pixel apply a 4x4 matrix 
+  - then aggregate that into one
+    - take all r channels => 4x4 matrix => new r value
+    - take all g channels => 4x4 matrix => new g value
+    - ...
+  - then half again
+
+und was machen wir dann mit dem halbierten?
+Hm... wir lassen es wieder größer werden? Was soll das bringen?
+Also, damit könnte man etwas gröbere features erkennen. 
+Aber bei uns ist ja eh alles random. 
+
+Wir bräuchten noch was zum lernen. 
+Vor allem soll das ganze nicht divergieren...
+  - normalisieren am Ende des neuronalen Netzes? Das wäre geil.
+
+---
+
+Frames linear interpolieren! damit es einigermaßen flüssig ausguckt.
+
+rgb => drei vierklänge einer Tonleiter. 
+  - der größte wert von r, g, b bestimmt den Akkord
+  - die Helligkeit bestimmt das getriggert werden
+    - schnelle veränderung nach oben: lauter anschlag
+    - mittlere veränderung nach oben: leiser anschlag
+    - kleine veränderung nach oben: nichts
+    - veränderung nach unten: note off (stopNote)
+
+Zweiter tab für die Settings
+  - midi mappings lernen
+    - store on localstorage as json
+    - export
+    - reset 
+  - thresholds etc
+
+Drums:  
+  - mod 16: für die meisten drumkits passend
+  
+
+---
+
+Zum start: 
+- eine mat4 mit random [-1,1] werten. 
+  - Vielleicht nur [0, 1] um flackern zu vermeiden?
+    - am ende wird ja normalisiert
+    - oder ich vermische es mit der bestehenden Farbe
+- read4 pixels into mat4
+- multiply with random mat4
+
+cool, dadurch, dass man die 4 pixel von sich aus und 1 nach rechts und 1 nach unten liest, entsteht eine bewegung nach oben links. 
+Und links tasten wir für die drums ab, oben tasten wir für die synthies ab
+
+- vielleicht mach ich das irgendwann noch komplexer mit downsampling und so, wie oben beschrieben
+
+
+---
+
+zweite Seite 'Controls'
+  - Broadcast Channel um mit der Animation zu kommunizieren
+  - kann auf einem anderen monitor platziert werden
