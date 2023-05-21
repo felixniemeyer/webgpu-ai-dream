@@ -1,5 +1,8 @@
 const brainSize = 64
-const keySize = 4
+const workgroupSize = 16
+const workgroups = 64 / workgroupSize
+
+const keySize = 4; 
 
 const brainTickShaderSrc = `
 // texture in and out
@@ -8,8 +11,9 @@ const brainTickShaderSrc = `
 @binding(2) @group(0) var weights: texture_2d<f32>;
 
 const size = ${brainSize}; 
+const workgroupSize = ${workgroupSize};
 
-@compute @workgroup_size(size, 1, 1)
+@compute @workgroup_size(${workgroupSize}, ${workgroupSize}, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var square = vec4<f32>(
     textureLoad(current, gid.xy, 1).r,
@@ -17,6 +21,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureLoad(current, gid.xy + vec2<u32>(0, 1), 1).r,
     textureLoad(current, gid.xy + vec2<u32>(1, 1), 1).r
   ); 
+  // if(gid.x == size - 1) {
+  //   square.y = 1.0;
+  //   square.w = 1.0;
+  // }
+  // if(gid.y == size - 1) {
+  //   square.z = 1.0;
+  //   square.w = 1.0;
+  // }
+  var weights = textureLoad(weights, gid.xy, 0);
+  var sum = dot(square, weights); 
+  // gelu
+  var out = vec4<f32>(max(0., sum));
+  textureStore(next, gid.xy, out);
 }
 `
 
@@ -48,20 +65,14 @@ const pixelSize = 1.0 / f32(sideLength);
 @fragment
 fn fragment_main(fragData: VertexOut) -> @location(0) vec4f 
 {
-  if(fragData.originalPosition.x > 0.) {
-    var rgb: vec3f = fragData.originalPosition.xyz * 0.5 + 0.5;
-    var l = length(fragData.originalPosition.xyz); 
-    var w = smoothstep(0.765, 0.77, l); 
-    rgb = (1.0 - w) * vec3f(1.0, 1.0, 1.0) + w * rgb; 
-    return vec4f(rgb, 1.0);
-  } else {
-    return vec4f(0.5, 0.5, 0.5, 1.0); 
-  }
+  var uv = fragData.originalPosition.xy * 0.5 + 0.5;
+  var value = textureLoad(currentBrainState, vec2<i32>(uv * size), 0).r;
+  return vec4f(value, 0.5, 0.5, 1.0); 
 }`
 
 
 window.addEventListener('load', async () => {
-  const bpm = 120
+  const bpm = 240
 
   function fail(msg: string): never {
     const error = document.getElementById('error')
@@ -87,8 +98,9 @@ window.addEventListener('load', async () => {
 
   // get canvas
   const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-  canvas.width = brainSize + keySize;
-  canvas.height = brainSize + keySize;
+  const canvasSize = Math.min(canvas.clientWidth, canvas.clientHeight);
+  canvas.width = canvasSize
+  canvas.height = canvasSize
 
   const context = canvas.getContext('webgpu');
   if(!context) {
@@ -146,12 +158,33 @@ window.addEventListener('load', async () => {
   // we need 3 activation state textures: previous, current, next
 
   const brainStates: GPUTexture[] = []
+  const initialBrainStateBuffer = device.createBuffer({
+    size: brainSize * brainSize * 4,
+    usage: GPUBufferUsage.COPY_SRC, 
+    mappedAtCreation: true,
+  })
+  const initialBrainState = new Float32Array(initialBrainStateBuffer.getMappedRange())
+  for(let i = 0; i < brainSize * brainSize; i++) {
+    initialBrainState[i] = Math.random() * 2.0 - 1.0
+  }
+  initialBrainStateBuffer.unmap()
+
   for(let i = 0; i < 3; i++) {
     brainStates[i] = device.createTexture({
       size: { width: brainSize, height: brainSize },
       format: 'r32float',
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
     }) 
+    const commandEncoder = device.createCommandEncoder();
+    commandEncoder.copyBufferToTexture({
+        buffer: initialBrainStateBuffer,
+        bytesPerRow: brainSize * 4,
+      }, { 
+        texture: brainStates[i],
+      },
+      [brainSize, brainSize, 1]
+    )
+    device.queue.submit([commandEncoder.finish()])
   }
 
   const drawBrainStateShaderModule = device.createShaderModule({
@@ -185,6 +218,7 @@ window.addEventListener('load', async () => {
     },
     [brainSize, brainSize, 1]
   )
+  device.queue.submit([commandEncoder.finish()])
 
   const brainTickBindGroups: GPUBindGroup[] = []
 
@@ -244,13 +278,6 @@ window.addEventListener('load', async () => {
           viewDimension: '2d',
           multisampled: false,
         }
-      },
-      {
-        binding: 2, 
-        visibility: GPUShaderStage.FRAGMENT, 
-        sampler: {
-          type: 'non-filtering'
-        }
       }
     ]
   })
@@ -275,10 +302,6 @@ window.addEventListener('load', async () => {
         {
           binding: 1,
           resource: brainStates[(i + 2) % 3].createView(),
-        },
-        {
-          binding: 2,
-          resource: dataTextureSampler,
         }
       ]
     })
@@ -329,7 +352,9 @@ window.addEventListener('load', async () => {
     primitive: {
       topology: 'triangle-strip',
     }, 
-    layout: "auto"
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [drawBrainStateBindGroupLayout],
+    }),
   };
 
   const renderPipeline = device.createRenderPipeline(drawBrainStatePipelineDescriptor);
@@ -342,9 +367,11 @@ window.addEventListener('load', async () => {
     const brainTickPassEncoder = brainTickCommandEncoder.beginComputePass();
     brainTickPassEncoder.setPipeline(brainTickComputePipeline);
     brainTickPassEncoder.setBindGroup(0, brainTickBindGroups[currentBrainState]);
-    brainTickPassEncoder.dispatchWorkgroups(brainSize); 
+    brainTickPassEncoder.dispatchWorkgroups(workgroups, workgroups, 1); 
     brainTickPassEncoder.end();
+    device.queue.submit([brainTickCommandEncoder.finish()]);
     console.log('brain tick')
+    currentBrainState = (currentBrainState + 1) % 3
     // good luck!
   }
 
