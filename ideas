@@ -1,9 +1,46 @@
 
+# allerdings... 
+- da ändert sich ja dann das ganze Bild
+
+# also jetzda
+
+- mit einem 4er kernel
+- runter auf 4 x 4 x 64
+  - 10 => 22 => 46 x 1
+
+- eigentlich verkleiner jede convolution ja nur um wenige pixel
+- außer der Kernel ist irgendwie 5 und man bewegt immer um zwei
+- dann hat man eine Überlappung
+  - und dann halt deconvolve...
+  - hmmm, vielleicht ist das ja auch langweilig
+  - außer die deconvolve gewichte sind auch wieder zufällig
+  - dann ist es interessant, wahrscheinlich
+  - let's try
+
+- kernel von 5, stride von 2, padding von 2
+
+- 3 layer ...
+
+- und wie groß ist die feature dimension?
+  - wenn ich das richtig verstanden habe, bildet sich zum beispiel ein wert, der ausdrückt, wie 
+
+- also, ich sollte eine kleine Auflösung von 64 haben (pro frame)
+
+- originale texture size: 
+  - 1 mit zwei padding und 2 stride
+  - 5 mit zwei padding und 2 stride
+  - 
+
+Ach mann... keine Lust :( 
+
+# also, jetzt mal serious: 
+- Wie will ich es machen?
+  - einfach ein paar kernel Anwenden?
+
 # webgpu 
 
 - hintergrund: ein shader, der ein flat object zeichnet 
   - z.B. einfach ein dreieck oder ein kreis
-
 
 # training idea
 
@@ -64,8 +101,6 @@ Generate MIDI and send it out
   - use playNote
   - with parameter options.time
   - using WebMIDI.time
-
-//
 
 So, we make 4ths tak tak tak tak, and maybe 120 bpm, so 2 frames per second. We can do expensive frames. 
 
