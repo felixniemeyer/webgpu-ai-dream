@@ -1,6 +1,6 @@
 const brainSize = 64
 const workgroupSize = 16
-const workgroups = 64 / workgroupSize
+const workgroups = brainSize / workgroupSize
 
 const keySize = 4; 
 
@@ -8,31 +8,45 @@ const brainTickShaderSrc = `
 // texture in and out
 @binding(0) @group(0) var current: texture_2d<f32>;
 @binding(1) @group(0) var next: texture_storage_2d<r32float, write>;
-@binding(2) @group(0) var weights: texture_2d<f32>;
+@binding(2) @group(0) var weights: texture_2d<u32>;
 
 const size = ${brainSize}; 
 const workgroupSize = ${workgroupSize};
 
+fn decomposeWeights(value: u32) -> vec4<f32> {
+
+
+  var decomposed = vec4<u32>(
+    (value & 0xFFu),
+    (value >> 8u) & 0xFFu,
+    (value >> 16u) & 0xFFu,
+    (value >> 24u) & 0xFFu
+  ); 
+
+  return vec4<f32>(decomposed) / 128.0 - 1.0; 
+}
+
 @compute @workgroup_size(${workgroupSize}, ${workgroupSize}, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  var square = vec4<f32>(
-    textureLoad(current, gid.xy, 1).r,
-    textureLoad(current, gid.xy + vec2<u32>(1, 0), 1).r,
-    textureLoad(current, gid.xy + vec2<u32>(0, 1), 1).r,
-    textureLoad(current, gid.xy + vec2<u32>(1, 1), 1).r
-  ); 
-  // if(gid.x == size - 1) {
-  //   square.y = 1.0;
-  //   square.w = 1.0;
-  // }
-  // if(gid.y == size - 1) {
-  //   square.z = 1.0;
-  //   square.w = 1.0;
-  // }
   var weights = textureLoad(weights, gid.xy, 0);
-  var sum = dot(square, weights); 
-  // gelu
-  var out = vec4<f32>(max(0., sum));
+  var sum = 0.;
+  for(var x = 0; x < 4; x++) {
+    var w = decomposeWeights(weights[x]);
+    var u = i32(gid.x) + x - 1; 
+    var v = i32(gid.y) - 1;
+
+    var square = vec4<f32>(
+      textureLoad(current, vec2<i32>(u, v - 1), 1).r,
+      textureLoad(current, vec2(u, v), 1).r,
+      textureLoad(current, vec2(u, v + 1), 1).r,
+      textureLoad(current, vec2(u, v + 2), 1).r
+    ); 
+    sum += dot(square, w); 
+  }
+  // activation function tanh
+  var activation = tanh(sum);
+
+  var out = vec4<f32>(activation, 0, 0, 1);
   textureStore(next, gid.xy, out);
 }
 `
@@ -146,7 +160,7 @@ window.addEventListener('load', async () => {
         binding: 2,
         visibility: GPUShaderStage.COMPUTE,
         texture: {
-          sampleType: 'unfilterable-float',
+          sampleType: 'uint',
           viewDimension: '2d',
           multisampled: false,
         }
@@ -194,7 +208,7 @@ window.addEventListener('load', async () => {
   // we need one weight texture, populated randomly
   const weights = device.createTexture({
     size: { width: brainSize, height: brainSize },
-    format: 'rgba32float',
+    format: 'rgba32uint',
     usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
   }) 
 
@@ -203,9 +217,9 @@ window.addEventListener('load', async () => {
     usage: GPUBufferUsage.COPY_SRC, 
     mappedAtCreation: true
   })
-  const data = new Float32Array(stagingBuffer.getMappedRange())
-  for(let i = 0; i < brainSize * brainSize * 4; i ++) {
-    data[i] = Math.random() * 2 - 1
+  const data = new Uint8Array(stagingBuffer.getMappedRange())
+  for(let i = 0; i < brainSize * brainSize * 4 * 4; i ++) {
+    data[i] = Math.trunc(Math.random() * 256)
   }
   stagingBuffer.unmap()
 
